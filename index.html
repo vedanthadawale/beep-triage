@@ -1,0 +1,641 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beep Triage — decision routing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --paper: #E9EBE8;
+    --panel: #FBFCFA;
+    --ink: #1C2321;
+    --soft: #5D6763;
+    --rule: #CDD3CE;
+    --pm: #B3701A;
+    --dev: #2F4EA8;
+    --design: #8A2F6B;
+    --content: #14706A;
+    --pass: #2E7D4F;
+    --fail: #B33A2A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Archivo', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 22px 80px; }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--ink);
+    flex-wrap: wrap;
+  }
+  .masthead h1 {
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .masthead p { margin: 4px 0 0; color: var(--soft); max-width: 52ch; }
+  .tally {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    color: var(--soft);
+    text-align: right;
+    line-height: 1.7;
+    white-space: nowrap;
+  }
+  .tally b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- two-column console ---------- */
+  .console {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 18px;
+    margin-top: 22px;
+    align-items: start;
+  }
+  @media (max-width: 880px) { .console { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    padding: 20px;
+  }
+  .panel h2 {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0 0 16px;
+    color: var(--soft);
+    letter-spacing: 0.01em;
+  }
+
+  /* ---------- form ---------- */
+  label { display: block; margin-bottom: 14px; }
+  label span { display: block; font-size: 13px; font-weight: 500; margin-bottom: 5px; }
+  input, textarea, select {
+    width: 100%;
+    font-family: inherit;
+    font-size: 14.5px;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid var(--rule);
+    padding: 9px 10px;
+  }
+  textarea { resize: vertical; min-height: 92px; line-height: 1.45; }
+  input:focus, textarea:focus, select:focus {
+    outline: 2px solid var(--ink);
+    outline-offset: -1px;
+    border-color: var(--ink);
+  }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  button {
+    font-family: inherit;
+    font-size: 14.5px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--ink);
+    background: var(--ink);
+    color: var(--panel);
+    padding: 10px 18px;
+  }
+  button:hover { background: #000; }
+  button:focus-visible { outline: 2px solid var(--pm); outline-offset: 2px; }
+  .ghost { background: transparent; color: var(--ink); font-weight: 500; }
+  .ghost:hover { background: var(--paper); }
+
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+
+  .samples { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--rule); }
+  .samples p { margin: 0 0 9px; font-size: 12.5px; color: var(--soft); }
+  .chip {
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 400;
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--soft);
+    padding: 5px 10px;
+    margin: 0 5px 5px 0;
+  }
+  .chip:hover { background: var(--paper); color: var(--ink); border-color: var(--ink); }
+
+  /* ---------- trace (the signature element) ---------- */
+  .empty {
+    font-size: 14px;
+    color: var(--soft);
+    border: 1px dashed var(--rule);
+    padding: 26px 20px;
+    line-height: 1.6;
+  }
+
+  .verdict {
+    border: 2px solid;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    animation: settle 0.32s ease-out both;
+  }
+  .verdict .route {
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .verdict .why { margin: 5px 0 0; font-size: 13.5px; color: var(--soft); }
+  .verdict .meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    margin-top: 9px;
+    padding-top: 9px;
+    border-top: 1px solid var(--rule);
+    color: var(--soft);
+  }
+
+  .gate {
+    display: grid;
+    grid-template-columns: 20px 1fr;
+    gap: 11px;
+    padding: 11px 0;
+    border-top: 1px solid var(--rule);
+    animation: settle 0.3s ease-out both;
+  }
+  .gate:first-of-type { border-top: none; }
+  .mark {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+  .mark.ok { color: var(--pass); }
+  .mark.no { color: var(--fail); }
+  .gate h3 { font-size: 14px; font-weight: 600; margin: 0; }
+  .gate p { font-size: 13px; color: var(--soft); margin: 3px 0 0; }
+  .ev {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    margin-top: 6px;
+    color: var(--ink);
+  }
+  .ev i { font-style: normal; background: #F0E4CE; padding: 1.5px 5px; margin-right: 4px; display: inline-block; }
+  .ev.none i { background: #E2E7E3; color: var(--soft); }
+
+  @keyframes settle { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .gate, .verdict { animation: none; } }
+
+  /* ---------- lanes ---------- */
+  .lanes-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin: 34px 0 12px; gap: 16px; flex-wrap: wrap;
+  }
+  .lanes-head h2 { font-size: 19px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  .lanes-head span { font-size: 13px; color: var(--soft); }
+
+  .lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 900px) { .lanes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .lanes { grid-template-columns: 1fr; } }
+
+  .lane { background: var(--panel); border: 1px solid var(--rule); border-top: 4px solid; padding: 13px; min-height: 130px; }
+  .lane-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 11px; }
+  .lane-title h3 { font-size: 14.5px; font-weight: 600; margin: 0; }
+  .lane-title b { font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  .lane > p { font-size: 12.5px; color: var(--soft); margin: 0; }
+
+  .card { border: 1px solid var(--rule); background: #fff; padding: 10px; margin-bottom: 8px; }
+  .card h4 { font-size: 13.5px; font-weight: 600; margin: 0 0 4px; line-height: 1.35; }
+  .card .sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; color: var(--soft);
+    display: flex; justify-content: space-between; gap: 8px;
+  }
+  .card .rsn { font-size: 12px; color: var(--soft); margin: 6px 0 0; line-height: 1.4; }
+
+  footer { margin-top: 46px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--soft); }
+  footer code { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; }
+</style>
+
+<div class="wrap">
+
+  <div class="masthead">
+    <div>
+      <h1>Beep Triage</h1>
+      <p>Every incoming ticket is read, classified and assigned an owner the moment it lands — and shows its working.</p>
+    </div>
+    <div class="tally" id="tally"></div>
+  </div>
+
+  <div class="console">
+
+    <section class="panel">
+      <h2>Raise a ticket</h2>
+
+      <label>
+        <span>Title</span>
+        <input id="f-title" placeholder="One line — what's happening?">
+      </label>
+
+      <label>
+        <span>Description</span>
+        <textarea id="f-desc" placeholder="What you saw, what you expected, anything you're unsure about."></textarea>
+      </label>
+
+      <div class="duo">
+        <label>
+          <span>Your name</span>
+          <input id="f-who" placeholder="e.g. Ananya">
+        </label>
+        <label>
+          <span>Type</span>
+          <select id="f-type">
+            <option value="unspecified">Not sure</option>
+            <option value="bug">Bug</option>
+            <option value="design">Design feedback</option>
+            <option value="content">Content fix</option>
+            <option value="feature">Feature request</option>
+            <option value="suggestion">Suggestion</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="go">Route ticket</button>
+        <button class="ghost" id="clear">Clear</button>
+      </div>
+
+      <div class="samples">
+        <p>Or try one of these:</p>
+        <div id="chips"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Routing trace</h2>
+      <div id="trace">
+        <div class="empty">
+          Nothing routed yet. Submit a ticket and the four gates it passed through will appear here, with the words that triggered each one.
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="lanes-head">
+    <h2>Queue</h2>
+    <span id="queue-note"></span>
+  </div>
+  <div class="lanes" id="lanes"></div>
+
+  <footer>
+    Rules engine v1 · <span id="rulecount"></span> keyword signals across 3 team lexicons · confidence floor <code>0.55</code> · ambiguous tickets fall back to the PM by design.
+  </footer>
+
+</div>
+
+<script>
+/* ============================================================
+   1. LEXICONS — the tunable part. A PM edits these, not the code.
+   ============================================================ */
+
+const LEX = {
+  dev: ['crash','crashes','crashed','error','exception','500','404','api','endpoint','bug','broken','not working',
+        "doesn't work",'does not work','stuck loading','infinite','spinner','timeout','timed out','database','query',
+        'backend','server','login','log in','auth','token','otp','payment','razorpay','webhook','sync','cache',
+        'deploy','console','null','undefined','freeze','freezes','app closes','force close','notification not',
+        'push notification','integration','scanner','qr','upload fails','duplicate entry','offline',
+        'slow','laggy','lags','hangs','not saving','not updating','blank screen','fails to load','wrong data'],
+
+  design: ['alignment','aligned','misaligned','spacing','padding','margin','colour','color','font','typeface','icon',
+           'layout','ui','user interface','visual','mockup','figma','responsive','overlap','overlapping','cramped',
+           'contrast','hierarchy','looks bad','hard to read','cluttered','cut off','truncated','illustration',
+           'thumbnail','wireframe','too small to tap','tap target','screen looks','banner','empty state',
+           'grey','gray','too light','too dark','unreadable','legible','readable','button','font size',
+           'too small','too big','spacing between'],
+
+  content: ['typo','copy','wording','grammar','spelling','spelt','spelled','misspelled','the text says','label',
+            'translation','hindi','marathi','tone','error message says','placeholder','faq','terms and conditions',
+            'privacy policy','blog','caption','headline','cta text','microcopy','punctuation','capitalis',
+            'capitaliz','reads awkward','wrong word']
+};
+
+/* Gate 0 — incidents that must not sit in a PM's inbox. */
+const CRITICAL = ['data loss','security','breach','leak','outage','production down','p0','all users','everyone is',
+                  'no one can','payment failed','double charged','money deducted','cannot check in','entry gate'];
+
+/* Gate 2 — the end state is not specified. Someone has to decide what "done" means. */
+const AMBIGUOUS = ['should we','should i','do we','can we','what if','maybe','perhaps','consider','exploring',
+                   'explore','not sure','unclear','wondering','thoughts','which one','better to','would be nice',
+                   'nice to have','idea:','suggest','propose','proposal','any way','somehow','feels like',
+                   'seems like','open to','up to you','or should','?',
+                   'feels ','seems ',' is off','something is','in general','overall','lately',
+                   'not great','could be better','revisit','a bit'];
+
+/* Gate 3 — the ask competes with something else for time, money or scope. */
+const TRADEOFF = [' vs ','versus','instead of','trade-off','tradeoff','priorit','deprioriti','roadmap','before we',
+                  'budget','cost','pricing','charge','resource','replace','new feature','add a new','build a',
+                  'launch','expand to','phase 2','worth it','scope','timeline','deadline','which first','either',
+                  'rethink','revamp','redesign the whole','strategy','monetis','monetiz'];
+
+/* Type priors — what the submitter picked shifts, but never overrides, the gates. */
+const PRIOR = {
+  bug:         { team: 'dev',     weight: 2, decisionLean: -1 },
+  design:      { team: 'design',  weight: 2, decisionLean: 0  },
+  content:     { team: 'content', weight: 2, decisionLean: -1 },
+  feature:     { team: null,      weight: 0, decisionLean: +2 },
+  suggestion:  { team: null,      weight: 0, decisionLean: +2 },
+  unspecified: { team: null,      weight: 0, decisionLean: 0  }
+};
+
+const TEAM_LABEL = { pm: 'Product Manager', dev: 'Development', design: 'Design', content: 'Content' };
+
+/* ============================================================
+   2. CLASSIFIER
+   ============================================================ */
+
+const hits = (text, list) => list.filter(k => text.includes(k));
+
+function classify(t) {
+  const text = (t.title + ' ' + t.description).toLowerCase();
+  const prior = PRIOR[t.type] || PRIOR.unspecified;
+  const gates = [];
+
+  /* --- Gate 0: critical incident override ------------------- */
+  const crit = hits(text, CRITICAL);
+  const isCritical = crit.length > 0;
+  gates.push({
+    id: 'G0', ok: !isCritical,
+    name: 'Is this a live incident?',
+    note: isCritical
+      ? 'Skips the queue. Goes straight to the owning team, PM notified rather than asked.'
+      : 'No incident language. Continues through normal triage.',
+    ev: crit
+  });
+
+  /* --- score the three team lexicons ------------------------ */
+  const scores = {};
+  const evid = {};
+  for (const team of ['dev', 'design', 'content']) {
+    evid[team] = hits(text, LEX[team]);
+    scores[team] = evid[team].length + (prior.team === team ? prior.weight : 0);
+  }
+  const ranked = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [topTeam, topScore] = ranked[0];
+  const secondScore = ranked[1][1];
+  const margin = topScore - secondScore;
+
+  /* --- Gate 1: is the end state already specified? ---------- */
+  const amb = hits(text, AMBIGUOUS);
+  let ambCount = amb.length;
+  if (prior.decisionLean < 0 && ambCount === 1 && amb[0] === '?') ambCount = 0; // a lone "?" in a bug report isn't a real question
+  const specified = ambCount === 0 && prior.decisionLean <= 0;
+  gates.push({
+    id: 'G1', ok: specified,
+    fail: 'the outcome is still an open question',
+    name: 'Is the desired outcome already specified?',
+    note: specified
+      ? 'The ticket says what "done" looks like. Nobody needs to decide that first.'
+      : (prior.decisionLean > 0 && ambCount === 0
+          ? 'Submitted as a ' + t.type + '. By definition someone has to decide whether to do it at all.'
+          : 'Open questions in the text. Someone has to define the outcome before work can start.'),
+    ev: amb
+  });
+
+  /* --- Gate 2: exactly one team can execute this? ----------- */
+  const clearOwner = topScore >= 2 && margin >= 1;
+  gates.push({
+    id: 'G2', ok: clearOwner,
+    fail: 'no single obvious owner',
+    name: 'Does exactly one team own this?',
+    note: topScore === 0
+      ? 'No team vocabulary matched. Ownership is not obvious from the text.'
+      : (topScore < 2
+          ? 'Only one weak signal. A single keyword is not enough to hand this to a team.'
+          : (margin < 1
+              ? 'Signals split evenly between ' + ranked[0][0] + ' and ' + ranked[1][0] + '. Two teams would have to agree a split.'
+              : TEAM_LABEL[topTeam] + ' leads ' + topScore + '–' + secondScore + '. Clear single owner.')),
+    ev: evid[topTeam].length ? evid[topTeam] : []
+  });
+
+  /* --- Gate 3: does it trade off against anything? ---------- */
+  const trade = hits(text, TRADEOFF);
+  const noTradeoff = trade.length === 0;
+  gates.push({
+    id: 'G3', ok: noTradeoff,
+    fail: 'it competes with other scope',
+    name: 'Is it free of trade-offs?',
+    note: noTradeoff
+      ? 'No competing scope, cost or sequencing to weigh up.'
+      : 'Touches scope, cost or sequencing. That is a prioritisation call, not a task.',
+    ev: trade
+  });
+
+  /* --- confidence ------------------------------------------- */
+  let conf = 0.45 + Math.min(evid[topTeam].length, 4) * 0.09 + (margin >= 2 ? 0.18 : margin >= 1 ? 0.08 : 0);
+  if (prior.team === topTeam) conf += 0.10;
+  conf = Math.min(0.97, Math.round(conf * 100) / 100);
+
+  /* --- verdict ---------------------------------------------- */
+  let owner, needsDecision, reason;
+
+  if (isCritical && topScore > 0) {
+    owner = topTeam; needsDecision = false;
+    reason = 'Live incident with a clear owner. Routed immediately, PM copied.';
+  } else if (specified && clearOwner && noTradeoff && conf >= 0.55) {
+    owner = topTeam; needsDecision = false;
+    reason = 'All four gates passed. Actionable as written by one team.';
+  } else if (specified && clearOwner && noTradeoff) {
+    owner = 'pm'; needsDecision = true;
+    reason = 'Gates passed but confidence is only ' + conf.toFixed(2) + ', under the 0.55 floor. Falls back to PM.';
+  } else {
+    owner = 'pm'; needsDecision = true;
+    const failed = gates.filter(g => !g.ok && g.id !== 'G0').map(g => g.fail);
+    reason = 'Sent to the PM because ' + (
+      failed.length === 1 ? failed[0]
+      : failed.slice(0, -1).join(', ') + ' and ' + failed[failed.length - 1]
+    ) + '.';
+  }
+
+  return { owner, needsDecision, confidence: conf, reason, gates, critical: isCritical, scores };
+}
+
+/* ============================================================
+   3. STORE — window.storage where available, memory otherwise.
+   ============================================================ */
+
+let tickets = [];
+let seq = 100;
+
+async function save() {
+  try {
+    if (window.storage) await window.storage.set('beep_tickets', JSON.stringify({ tickets, seq }));
+  } catch (e) { /* memory-only session */ }
+}
+
+async function load() {
+  try {
+    if (window.storage) {
+      const r = await window.storage.get('beep_tickets');
+      if (r && r.value) { const d = JSON.parse(r.value); tickets = d.tickets || []; seq = d.seq || 100; return; }
+    }
+  } catch (e) { /* first run or no storage */ }
+  tickets = SEED.map(makeTicket);
+}
+
+function makeTicket(raw) {
+  const v = classify(raw);
+  return {
+    id: 'BEEP-' + (++seq),
+    title: raw.title, description: raw.description,
+    submitter: raw.submitter || 'Anonymous', type: raw.type,
+    owner: v.owner, needsDecision: v.needsDecision,
+    confidence: v.confidence, reason: v.reason,
+    at: new Date().toISOString()
+  };
+}
+
+/* ============================================================
+   4. SAMPLES — real-shaped Beep tickets, one per outcome.
+   ============================================================ */
+
+const SEED = [
+  { title: 'QR scanner freezes at the entry gate',
+    description: 'Volunteers at the Kalyani fest gate said the scanner app stops responding after roughly 40 scans. They have to force close and reopen it while a queue builds up.',
+    submitter: 'Rohit', type: 'bug' },
+  { title: 'Should clubs be able to publish paid events without approval?',
+    description: 'Right now every paid event waits on us. Faster for clubs if they self-publish, but we lose the check on refunds and pricing. Not sure which way to go.',
+    submitter: 'Ananya', type: 'suggestion' },
+  { title: 'Fest banner text overlaps the date on small phones',
+    description: 'On a 5.5 inch screen the event title runs into the date chip. Title should truncate at two lines instead.',
+    submitter: 'Kabir', type: 'design' },
+  { title: '"Regsiter" is spelt wrong on the event card',
+    description: 'The button on the event card reads Regsiter. Should read Register.',
+    submitter: 'Meera', type: 'content' },
+  { title: 'Add a waitlist for sold-out events',
+    description: 'Students keep messaging organisers after tickets run out. A waitlist would capture that demand, though it needs new notification flows and probably competes with the refunds work.',
+    submitter: 'Dhruva', type: 'feature' }
+];
+
+/* ============================================================
+   5. RENDER
+   ============================================================ */
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const el = id => document.getElementById(id);
+
+function renderTrace(v, ticket) {
+  const colour = 'var(--' + v.owner + ')';
+  let html = '<div class="verdict" style="border-color:' + colour + '">'
+    + '<p class="route" style="color:' + colour + '">'
+    + (v.needsDecision ? 'Needs a decision → ' : 'No decision needed → ')
+    + esc(TEAM_LABEL[v.owner]) + '</p>'
+    + '<p class="why">' + esc(v.reason) + '</p>'
+    + '<p class="meta">' + esc(ticket.id)
+    + (v.owner === 'pm' ? '' : ' · team match ' + v.confidence.toFixed(2))
+    + ' · raised by ' + esc(ticket.submitter) + (v.critical ? ' · INCIDENT' : '') + '</p>'
+    + '</div>';
+
+  v.gates.forEach((g, i) => {
+    const evClass = g.ev.length ? 'ev' : 'ev none';
+    const evHtml = g.ev.length
+      ? g.ev.slice(0, 6).map(k => '<i>' + esc(k.trim()) + '</i>').join('')
+      : '<i>no signals</i>';
+    html += '<div class="gate" style="animation-delay:' + (0.09 * (i + 1)) + 's">'
+      + '<div class="mark ' + (g.ok ? 'ok' : 'no') + '">' + (g.ok ? '✓' : '✗') + '</div>'
+      + '<div><h3>' + esc(g.id) + ' · ' + esc(g.name) + '</h3>'
+      + '<p>' + esc(g.note) + '</p>'
+      + '<div class="' + evClass + '">' + evHtml + '</div></div></div>';
+  });
+
+  el('trace').innerHTML = html;
+}
+
+function renderLanes() {
+  const order = ['pm', 'design', 'dev', 'content'];
+  const blurb = {
+    pm: 'Judgment calls waiting on a prioritisation decision.',
+    design: 'Specified visual work, ready to pick up.',
+    dev: 'Specified build or fix work, ready to pick up.',
+    content: 'Copy and wording changes, ready to pick up.'
+  };
+
+  el('lanes').innerHTML = order.map(team => {
+    const mine = tickets.filter(t => t.owner === team).slice().reverse();
+    const cards = mine.map(t =>
+      '<div class="card">'
+      + '<h4>' + esc(t.title) + '</h4>'
+      + '<div class="sub"><span>' + esc(t.id) + '</span><span>' + esc(t.submitter) + '</span></div>'
+      + '<p class="rsn">' + esc(t.reason) + '</p>'
+      + '</div>').join('');
+
+    return '<div class="lane" style="border-top-color: var(--' + team + ')">'
+      + '<div class="lane-title"><h3>' + esc(TEAM_LABEL[team]) + '</h3>'
+      + '<b style="color: var(--' + team + ')">' + mine.length + '</b></div>'
+      + (cards || '<p>' + blurb[team] + '</p>') + '</div>';
+  }).join('');
+
+  const auto = tickets.filter(t => !t.needsDecision).length;
+  const pct = tickets.length ? Math.round(auto / tickets.length * 100) : 0;
+  el('tally').innerHTML = '<b>' + tickets.length + '</b> routed<br><b>' + pct + '%</b> cleared without a PM';
+  el('queue-note').textContent = auto + ' of ' + tickets.length
+    + ' went straight to a team. The rest need a call from the PM.';
+}
+
+/* ============================================================
+   6. WIRING
+   ============================================================ */
+
+function submit() {
+  const raw = {
+    title: el('f-title').value.trim(),
+    description: el('f-desc').value.trim(),
+    submitter: el('f-who').value.trim(),
+    type: el('f-type').value
+  };
+  if (!raw.title) { el('f-title').focus(); return; }
+
+  const ticket = makeTicket(raw);
+  tickets.push(ticket);
+  renderTrace(classify(raw), ticket);
+  renderLanes();
+  save();
+  document.querySelector('.console').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+el('go').onclick = submit;
+el('clear').onclick = () => {
+  ['f-title', 'f-desc', 'f-who'].forEach(id => el(id).value = '');
+  el('f-type').value = 'unspecified';
+  el('f-title').focus();
+};
+
+el('chips').innerHTML = SEED.map((s, i) =>
+  '<button class="chip" data-i="' + i + '">' + esc(s.title.slice(0, 34)) + '…</button>').join('');
+
+el('chips').onclick = e => {
+  const btn = e.target.closest('.chip');
+  if (!btn) return;
+  const s = SEED[+btn.dataset.i];
+  el('f-title').value = s.title;
+  el('f-desc').value = s.description;
+  el('f-who').value = s.submitter;
+  el('f-type').value = s.type;
+};
+
+el('rulecount').textContent =
+  LEX.dev.length + LEX.design.length + LEX.content.length + CRITICAL.length + AMBIGUOUS.length + TRADEOFF.length;
+
+load().then(renderLanes);
+</script>
